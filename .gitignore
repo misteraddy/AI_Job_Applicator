@@ -1,45 +1,41 @@
-# Virtual environment
-job_venv/
-venv/
-.venv/
-env/
-
-# Environment variables / secrets
+# Environment variables
 .env
 .env.*
-!.env.example
 
-# Python cache
+# OAuth credentials
+credentials.json
+token.json
+client_secret*.json
+
+# PDF resumes / uploaded files
+*.pdf
+uploads/
+data/
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 
+# Virtual environments
+venv/
+.venv/
+job_venv/
+env/
+
 # Streamlit
 .streamlit/secrets.toml
 
-# Uploaded resumes / user files
-uploads/
-resumes/
-*.pdf
-
-# Logs
-*.log
-
-# IDE
+# IDEs
 .vscode/
 .idea/
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Jupyter
-.ipynb_checkpoints/
-
-# Build / distribution
-build/
-dist/
-*.egg-info/
+# Logs
+*.log
 
 # Temporary files
 *.tmp

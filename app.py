@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import smtplib
+import base64
 from email.message import EmailMessage
 from html import escape
 
@@ -10,7 +10,12 @@ from dotenv import load_dotenv
 from pypdf import PdfReader
 from google import genai
 
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+
 load_dotenv()
+
 
 def get_setting(name, default=None):
     try:
@@ -20,17 +25,19 @@ def get_setting(name, default=None):
 
 
 GEMINI_API_KEY = get_setting("GEMINI_API_KEY")
-SMTP_HOST = get_setting("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(get_setting("SMTP_PORT", 587))
-SMTP_USER = get_setting("SMTP_USER")
-SMTP_PASSWORD = get_setting("SMTP_PASSWORD")
-SMTP_FROM = get_setting("SMTP_FROM", SMTP_USER)
+
+GMAIL_CLIENT_ID = get_setting("GMAIL_CLIENT_ID")
+GMAIL_CLIENT_SECRET = get_setting("GMAIL_CLIENT_SECRET")
+GMAIL_REFRESH_TOKEN = get_setting("GMAIL_REFRESH_TOKEN")
+GMAIL_FROM = get_setting("GMAIL_FROM")
+
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def extract_email(text):
     pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+
     emails = re.findall(pattern, text)
 
     excluded_domains = {
@@ -40,7 +47,8 @@ def extract_email(text):
     }
 
     emails = [
-        email for email in emails
+        email
+        for email in emails
         if email.lower().split("@")[-1] not in excluded_domains
     ]
 
@@ -119,11 +127,42 @@ Required format:
     return json.loads(result)
 
 
+def get_gmail_service():
+
+    if not GMAIL_CLIENT_ID:
+        raise ValueError("GMAIL_CLIENT_ID is missing.")
+
+    if not GMAIL_CLIENT_SECRET:
+        raise ValueError("GMAIL_CLIENT_SECRET is missing.")
+
+    if not GMAIL_REFRESH_TOKEN:
+        raise ValueError("GMAIL_REFRESH_TOKEN is missing.")
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=GMAIL_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GMAIL_CLIENT_ID,
+        client_secret=GMAIL_CLIENT_SECRET,
+        scopes=[
+            "https://www.googleapis.com/auth/gmail.send"
+        ]
+    )
+
+    return build(
+        "gmail",
+        "v1",
+        credentials=credentials
+    )
+
+
 def send_email(recipient, subject, text_body, pdf_file):
+
+    service = get_gmail_service()
 
     message = EmailMessage()
 
-    message["From"] = SMTP_FROM
+    message["From"] = GMAIL_FROM
     message["To"] = recipient
     message["Subject"] = subject
 
@@ -131,10 +170,15 @@ def send_email(recipient, subject, text_body, pdf_file):
 
     html_body = "<html><body>"
     html_body += "<br>".join(
-        escape(line) for line in text_body.splitlines()
+        escape(line)
+        for line in text_body.splitlines()
     )
     html_body += "</body></html>"
-    message.add_alternative(html_body, subtype="html")
+
+    message.add_alternative(
+        html_body,
+        subtype="html"
+    )
 
     pdf_bytes = pdf_file.getvalue()
 
@@ -145,16 +189,18 @@ def send_email(recipient, subject, text_body, pdf_file):
         filename=pdf_file.name
     )
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+    raw_message = base64.urlsafe_b64encode(
+        message.as_bytes()
+    ).decode()
 
-        server.starttls()
+    body = {
+        "raw": raw_message
+    }
 
-        server.login(
-            SMTP_USER,
-            SMTP_PASSWORD
-        )
-
-        server.send_message(message)
+    service.users().messages().send(
+        userId="me",
+        body=body
+    ).execute()
 
 
 st.set_page_config(
@@ -163,6 +209,7 @@ st.set_page_config(
     layout="wide"
 )
 
+
 st.title("📩 AI Job Application Assistant")
 
 st.write(
@@ -170,11 +217,13 @@ st.write(
     "to generate a personalized application email."
 )
 
+
 linkedin_post = st.text_area(
     "LinkedIn Job Post",
     height=350,
     placeholder="Paste the complete LinkedIn job post here..."
 )
+
 
 resume_file = st.file_uploader(
     "Upload PDF Resume",
@@ -189,19 +238,27 @@ if st.button(
 
     if not linkedin_post.strip():
 
-        st.error("Please paste the LinkedIn job post.")
+        st.error(
+            "Please paste the LinkedIn job post."
+        )
 
     elif resume_file is None:
 
-        st.error("Please upload your PDF resume.")
+        st.error(
+            "Please upload your PDF resume."
+        )
 
     elif not GEMINI_API_KEY:
 
-        st.error("GEMINI_API_KEY is missing.")
+        st.error(
+            "GEMINI_API_KEY is missing."
+        )
 
     else:
 
-        with st.spinner("Analyzing job post and resume..."):
+        with st.spinner(
+            "Analyzing job post and resume..."
+        ):
 
             recipient_email = extract_email(
                 linkedin_post
@@ -210,7 +267,8 @@ if st.button(
             if not recipient_email:
 
                 st.error(
-                    "No valid email address was found in the LinkedIn post."
+                    "No valid email address was found "
+                    "in the LinkedIn post."
                 )
 
                 st.stop()
@@ -286,23 +344,37 @@ if st.session_state.get("generated"):
         type="primary"
     ):
 
-        if not SMTP_USER:
+        if not GMAIL_FROM:
 
             st.error(
-                "SMTP_USER is missing."
+                "GMAIL_FROM is missing."
             )
 
-        elif not SMTP_PASSWORD:
+        elif not GMAIL_CLIENT_ID:
 
             st.error(
-                "SMTP_PASSWORD is missing."
+                "GMAIL_CLIENT_ID is missing."
+            )
+
+        elif not GMAIL_CLIENT_SECRET:
+
+            st.error(
+                "GMAIL_CLIENT_SECRET is missing."
+            )
+
+        elif not GMAIL_REFRESH_TOKEN:
+
+            st.error(
+                "GMAIL_REFRESH_TOKEN is missing."
             )
 
         else:
 
             try:
 
-                with st.spinner("Sending email..."):
+                with st.spinner(
+                    "Sending email through Gmail..."
+                ):
 
                     send_email(
                         recipient=st.session_state.recipient_email,
