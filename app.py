@@ -3,6 +3,7 @@ import re
 import json
 import smtplib
 from email.message import EmailMessage
+from html import escape
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -11,9 +12,19 @@ from google import genai
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+def get_setting(name, default=None):
+    try:
+        return st.secrets.get(name) or os.getenv(name, default)
+    except Exception:
+        return os.getenv(name, default)
+
+
+GEMINI_API_KEY = get_setting("GEMINI_API_KEY")
+SMTP_HOST = get_setting("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(get_setting("SMTP_PORT", 587))
+SMTP_USER = get_setting("SMTP_USER")
+SMTP_PASSWORD = get_setting("SMTP_PASSWORD")
+SMTP_FROM = get_setting("SMTP_FROM", SMTP_USER)
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -108,15 +119,22 @@ Required format:
     return json.loads(result)
 
 
-def send_email(recipient, subject, body, pdf_file):
+def send_email(recipient, subject, text_body, pdf_file):
 
     message = EmailMessage()
 
-    message["From"] = GMAIL_ADDRESS
+    message["From"] = SMTP_FROM
     message["To"] = recipient
     message["Subject"] = subject
 
-    message.set_content(body)
+    message.set_content(text_body)
+
+    html_body = "<html><body>"
+    html_body += "<br>".join(
+        escape(line) for line in text_body.splitlines()
+    )
+    html_body += "</body></html>"
+    message.add_alternative(html_body, subtype="html")
 
     pdf_bytes = pdf_file.getvalue()
 
@@ -127,13 +145,13 @@ def send_email(recipient, subject, body, pdf_file):
         filename=pdf_file.name
     )
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
 
         server.starttls()
 
         server.login(
-            GMAIL_ADDRESS,
-            GMAIL_APP_PASSWORD
+            SMTP_USER,
+            SMTP_PASSWORD
         )
 
         server.send_message(message)
@@ -268,16 +286,16 @@ if st.session_state.get("generated"):
         type="primary"
     ):
 
-        if not GMAIL_ADDRESS:
+        if not SMTP_USER:
 
             st.error(
-                "GMAIL_ADDRESS is missing."
+                "SMTP_USER is missing."
             )
 
-        elif not GMAIL_APP_PASSWORD:
+        elif not SMTP_PASSWORD:
 
             st.error(
-                "GMAIL_APP_PASSWORD is missing."
+                "SMTP_PASSWORD is missing."
             )
 
         else:
@@ -289,7 +307,7 @@ if st.session_state.get("generated"):
                     send_email(
                         recipient=st.session_state.recipient_email,
                         subject=subject,
-                        body=body,
+                        text_body=body,
                         pdf_file=resume_file
                     )
 
